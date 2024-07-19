@@ -307,7 +307,7 @@ static size_t set_transmit_buffer() {
         func_code == FUNC_WRITE_MULTIPLE_REGISTERS ||
         func_code == FUNC_READ_WRITE_MULTIPLE_REGISTERS) {
         append += mbuf_append(&s_modbus->transmit_buffer, &s_modbus->write_data_len, sizeof(uint8_t));
-        append += mbuf_append_and_free(&s_modbus->transmit_buffer, s_modbus->write_data, s_modbus->write_data_len);
+        append += mbuf_append(&s_modbus->transmit_buffer, s_modbus->write_data, s_modbus->write_data_len); // Removed mbuf_append_and_free
         LOG(LL_DEBUG, ("SlaveID: %.2x, Function: %.2x - Set Transmit Buffer", s_modbus->slave_id_u8, s_modbus->func_code_u8));
     }
 
