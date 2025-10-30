@@ -67,8 +67,10 @@ obtain a copy.
     @param uint16_t crc (0x0000..0xFFFF)
     @param uint8_t a (0x00..0xFF)
     @return calculated CRC (0x0000..0xFFFF)
+    
+    Note: Changed from 'static' to 'static inline' for performance optimization
 */
-static uint16_t crc16_update(uint16_t crc, uint8_t a)
+static inline uint16_t crc16_update(uint16_t crc, uint8_t a)
 {
   int i;
 
