@@ -534,4 +534,4 @@ bool mgos_modbus_init(void) {
     return mgos_modbus_create(&mgos_sys_config.modbus);
 }
 
-}
+
