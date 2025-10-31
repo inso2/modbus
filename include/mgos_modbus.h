@@ -12,48 +12,143 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */
+*/
 
-#ifndef MGOS_MODBUS_H_
-#define MGOS_MODBUS_H_
+#ifndef CS_MOS_LIBS_MODBUS_INCLUDE_MGOS_MODBUS_H_
+#define CS_MOS_LIBS_MODBUS_INCLUDE_MGOS_MODBUS_H_
 
 #include "mgos.h"
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C" {  // Make sure we have C-declarations in C++ programs
 #endif
 
 // Modbus exception codes
-#define EX_ILLEGAL_FUNCTION      0x01  // Function code not allowed
-#define EX_ILLEGAL_DATA_ADDRESS  0x02  // Data address not allowed
-#define EX_ILLEGAL_DATA_VALUE    0x03  // Data value not allowed
-#define EX_SLAVE_DEVICE_FAILURE  0x04  // Unrecoverable error occurred
-
-// Response status codes
-#define RESP_SUCCESS             0x00  // Transaction successful
-#define RESP_INVALID_SLAVE_ID    0xE0  // Slave ID mismatch
-#define RESP_INVALID_FUNCTION    0xE1  // Function code mismatch
-#define RESP_TIMED_OUT           0xE2  // Response timeout
-#define RESP_INVALID_CRC         0xE3  // CRC check failed
-
-// Modbus function codes for bit access
-#define FUNC_READ_COILS                0x01  // Read Coils
-#define FUNC_READ_DISCRETE_INPUTS      0x02  // Read Discrete Inputs
-#define FUNC_WRITE_SINGLE_COIL         0x05  // Write Single Coil
-#define FUNC_WRITE_MULTIPLE_COILS      0x0F  // Write Multiple Coils
-
-// Modbus function codes for 16-bit register access
-#define FUNC_READ_HOLDING_REGISTERS          0x03  // Read Holding Registers
-#define FUNC_READ_INPUT_REGISTERS            0x04  // Read Input Registers
-#define FUNC_WRITE_SINGLE_REGISTER           0x06  // Write Single Register
-#define FUNC_WRITE_MULTIPLE_REGISTERS        0x10  // Write Multiple Registers
-#define FUNC_MASK_WRITE_REGISTER             0x16  // Mask Write Register
-#define FUNC_READ_WRITE_MULTIPLE_REGISTERS   0x17  // Read/Write Multiple Registers
+/**
+    Modbus protocol illegal function exception.
+    
+    The function code received in the query is not an allowable action for
+    the server (or slave). This may be because the function code is only
+    applicable to newer devices, and was not implemented in the unit
+    selected. It could also indicate that the server (or slave) is in the
+    wrong state to process a request of this type, for example because it is
+    unconfigured and is being asked to return register values.
+    
+    @ingroup constant
+    */
+static const uint8_t EX_ILLEGAL_FUNCTION = 0x01;
 
 /**
- * Modbus request information structure
- * Contains details about the modbus request for use in callbacks
- */
+    Modbus protocol illegal data address exception.
+    
+    The data address received in the query is not an allowable address for 
+    the server (or slave). More specifically, the combination of reference 
+    number and transfer length is invalid. For a controller with 100 
+    registers, the ADU addresses the first register as 0, and the last one 
+    as 99. If a request is submitted with a starting register address of 96 
+    and a quantity of registers of 4, then this request will successfully 
+    operate (address-wise at least) on registers 96, 97, 98, 99. If a 
+    request is submitted with a starting register address of 96 and a 
+    quantity of registers of 5, then this request will fail with Exception 
+    Code 0x02 "Illegal Data Address" since it attempts to operate on 
+    registers 96, 97, 98, 99 and 100, and there is no register with address 
+    100. 
+    
+    @ingroup constant
+    */
+static const uint8_t EX_ILLEGAL_DATA_ADDRESS = 0x02;
+
+/**
+    Modbus protocol illegal data value exception.
+    
+    A value contained in the query data field is not an allowable value for 
+    server (or slave). This indicates a fault in the structure of the 
+    remainder of a complex request, such as that the implied length is 
+    incorrect. It specifically does NOT mean that a data item submitted for 
+    storage in a register has a value outside the expectation of the 
+    application program, since the MODBUS protocol is unaware of the 
+    significance of any particular value of any particular register.
+    
+    @ingroup constant
+    */
+static const uint8_t EX_ILLEGAL_DATA_VALUE = 0x03;
+
+/**
+    Modbus protocol slave device failure exception.
+    
+    An unrecoverable error occurred while the server (or slave) was
+    attempting to perform the requested action.
+    
+    @ingroup constant
+    */
+static const uint8_t EX_SLAVE_DEVICE_FAILURE = 0x04;
+
+// Class-defined success/exception codes
+/**
+    ModbusMaster success.
+    
+    Modbus transaction was successful; the following checks were valid:
+      - slave ID
+      - function code
+      - response code
+      - data
+      - CRC
+      
+    @ingroup constant
+    */
+static const uint8_t RESP_SUCCESS = 0x00;
+
+/**
+    ModbusMaster invalid response slave ID exception.
+    
+    The slave ID in the response does not match that of the request.
+    
+    @ingroup constant
+    */
+static const uint8_t RESP_INVALID_SLAVE_ID = 0xE0;
+
+/**
+    ModbusMaster invalid response function exception.
+    
+    The function code in the response does not match that of the request.
+    
+    @ingroup constant
+    */
+static const uint8_t RESP_INVALID_FUNCTION = 0xE1;
+
+/**
+    ModbusMaster response timed out exception.
+    
+    The entire response was not received within the timeout period, 
+    ModbusMaster::ku8MBResponseTimeout. 
+    
+    @ingroup constant
+    */
+static const uint8_t RESP_TIMED_OUT = 0xE2;
+
+/**
+    ModbusMaster invalid response CRC exception.
+    
+    The CRC in the response does not match the one calculated.
+    
+    @ingroup constant
+    */
+static const uint8_t RESP_INVALID_CRC = 0xE3;
+
+// Modbus function codes for bit access
+static const uint8_t FUNC_READ_COILS = 0x01;            ///< Modbus function 0x01 Read Coils
+static const uint8_t FUNC_READ_DISCRETE_INPUTS = 0x02;  ///< Modbus function 0x02 Read Discrete Inputs
+static const uint8_t FUNC_WRITE_SINGLE_COIL = 0x05;     ///< Modbus function 0x05 Write Single Coil
+static const uint8_t FUNC_WRITE_MULTIPLE_COILS = 0x0F;  ///< Modbus function 0x0F Write Multiple Coils
+
+// Modbus function codes for 16 bit access
+static const uint8_t FUNC_READ_HOLDING_REGISTERS = 0x03;         ///< Modbus function 0x03 Read Holding Registers
+static const uint8_t FUNC_READ_INPUT_REGISTERS = 0x04;           ///< Modbus function 0x04 Read Input Registers
+static const uint8_t FUNC_WRITE_SINGLE_REGISTER = 0x06;          ///< Modbus function 0x06 Write Single Register
+static const uint8_t FUNC_WRITE_MULTIPLE_REGISTERS = 0x10;       ///< Modbus function 0x10 Write Multiple Registers
+static const uint8_t FUNC_MASK_WRITE_REGISTER = 0x16;            ///< Modbus function 0x16 Mask Write Register
+static const uint8_t FUNC_READ_WRITE_MULTIPLE_REGISTERS = 0x17;  ///< Modbus function 0x17 Read Write Multiple Registers
+
 struct mb_request_info {
     uint8_t slave_id;
     uint16_t read_address;
@@ -65,17 +160,9 @@ struct mb_request_info {
     uint8_t func_code;
 };
 
-/**
- * Modbus response callback function type
- * @param status Response status code (RESP_SUCCESS or error code)
- * @param info Request information
- * @param response Response buffer containing modbus data
- * @param param User-defined parameter passed to the request
- */
-typedef void (*mb_response_callback)(uint8_t status, struct mb_request_info info, 
-                                     struct mbuf response, void* param);
+/* Modbus response callback */
+typedef void (*mb_response_callback)(uint8_t status, struct mb_request_info info, struct mbuf response, void* param);
 
-// Modbus read operations
 bool mb_read_coils(uint8_t slave_id, uint16_t read_address, uint16_t read_qty,
                    mb_response_callback cb, void* cb_arg);
 
@@ -88,7 +175,6 @@ bool mb_read_holding_registers(uint8_t slave_id, uint16_t read_address, uint16_t
 bool mb_read_input_registers(uint8_t slave_id, uint16_t read_address, uint16_t read_qty,
                              mb_response_callback cb, void* cb_arg);
 
-// Modbus write operations
 bool mb_write_single_coil(uint8_t slave_id, uint16_t write_address, uint16_t write_value,
                           mb_response_callback cb, void* cb_arg);
 
@@ -101,84 +187,46 @@ bool mb_write_multiple_coils(uint8_t slave_id, uint16_t write_address, uint16_t 
 bool mb_write_multiple_registers(uint8_t slave_id, uint16_t write_address, uint16_t write_qty,
                                  uint8_t* data, uint8_t len, mb_response_callback cb, void* cb_arg);
 
-// Modbus advanced operations
 bool mb_read_write_multiple_registers(uint8_t slave_id, uint16_t read_address, uint16_t read_qty,
                                       uint16_t write_address, uint16_t write_qty, uint8_t* data,
                                       uint8_t len, mb_response_callback cb, void* cb_arg);
 
-bool mb_mask_write_register(uint8_t slave_id, uint16_t address, uint16_t and_mask, 
-                            uint16_t or_mask, mb_response_callback cb, void* cb_arg);
+bool mb_mask_write_register(uint8_t slave_id, uint16_t address, uint16_t andMask, uint16_t orMask,
+                            mb_response_callback cb, void* cb_arg);
 
-// Data parsing utilities
-/**
- * Parse 32-bit inverse long from modbus response buffer
- * Modbus byte order: BADC
- * @param strt_ptr Pointer to start of 4-byte value in buffer
- * @return Parsed long value
- */
+/*
+Currently supported type: float, long inverse and hex(default)
+Sample json map:
+{
+    "W_total": {
+        "type": "float",
+        "add": 100
+    },
+    "W_r": {
+        "type": "long_inv",
+        "add": 102
+    },
+    "W_r": 104
+}
+*/
+
+//Parses the modbus response buffer from the start point to a 32 bit inverse long type
 long parse_value_long_inverse_32(uint8_t* strt_ptr);
 
-/**
- * Parse 32-bit float from modbus response buffer
- * Modbus byte order: BADC -> C memory: DCBA
- * @param strt_ptr Pointer to start of 4-byte value in buffer
- * @return Parsed float value
- */
+//Parses the modbus response buffer from the start point to 32 bit float type
 float parse_value_float32(uint8_t* strt_ptr);
 
-/**
- * Map modbus response to JSON using JSON map string
- * 
- * JSON map format:
- * {
- *     "attribute_name": {
- *         "type": "float|long_inv|hex",
- *         "add": <register_address>
- *     }
- * }
- * Or simplified: { "attribute_name": <register_address> }
- * 
- * @param json_map JSON mapping string
- * @param mb_resp Modbus response buffer
- * @param info Request information
- * @return Allocated JSON string (caller must free) or NULL on error
- */
-char* mb_map_register_response(const char* json_map, struct mbuf* mb_resp, 
-                               struct mb_request_info* info);
+//Maps the modbus response to a json with the given json map
+char* mb_map_register_response(const char* json_map, struct mbuf* mb_resp, struct mb_request_info* info);
 
-/**
- * Map modbus response to JSON using JSON map from file
- * @param json_file Path to JSON map file
- * @param mb_resp Modbus response buffer
- * @param info Request information
- * @return Allocated JSON string (caller must free) or NULL on error
- */
-char* mb_map_register_responsef(const char* json_file, struct mbuf* mb_resp, 
-                                struct mb_request_info* info);
+//Maps the modbus response to a json with the given json map from the file
+char* mb_map_register_responsef(const char* json_file, struct mbuf* mb_resp, struct mb_request_info* info);
 
-// Initialization functions
-/**
- * Create and configure modbus instance
- * @param cfg Modbus configuration structure
- * @return true on success, false on failure
- */
-bool mgos_modbus_create(const struct mgos_config_modbus* cfg);
-
-/**
- * Initialize modbus subsystem
- * Called automatically during system init
- * @return true on success, false on failure
- */
-bool mgos_modbus_init(void);
-
-/**
- * Connect/reconnect modbus (reconfigure UART)
- * @return true on success, false on failure
- */
-bool mgos_modbus_connect(void);
+//Initialize the modbus connection
+bool mgos_modbus_connect();
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* MGOS_MODBUS_H_ */
+#endif /* CS_MOS_LIBS_MODBUS_INCLUDE_MGOS_MODBUS_H_ */
