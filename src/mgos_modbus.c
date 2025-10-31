@@ -107,13 +107,6 @@ Each character = 1 start + 8 data + 1 parity + 1 stop = 11 bits
 At baud rates >= 19200, use fixed 1.75ms minimum
 */
 static int calculate_frame_gap_ms(void) {
-/*
-Calculate frame gap delay based on baud rate (3.5 character times)
-Modbus RTU requires 3.5 character silence between frames.
-Each character = 1 start + 8 data + 1 parity + 1 stop = 11 bits
-At baud rates >= 19200, use fixed 1.75ms minimum
-*/
-static int calculate_frame_gap_ms(void) {
     int baud = mgos_sys_config_get_modbus_baudrate();
     if (baud >= 19200) {
         return 2;  // Fixed 1.75ms minimum, rounded up to 2ms
