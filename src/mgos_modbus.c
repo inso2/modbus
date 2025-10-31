@@ -101,24 +101,12 @@ static uint8_t verify_crc16(struct mbuf value) {
 }
 
 /*
-Calculate dynamic timeout based on baud rate and expected response size
+Calculate frame gap delay based on baud rate (3.5 character times)
+Modbus RTU requires 3.5 character silence between frames.
+Each character = 1 start + 8 data + 1 parity + 1 stop = 11 bits
+At baud rates >= 19200, use fixed 1.75ms minimum
 */
-static int calculate_dynamic_timeout_ms(uint16_t expected_bytes) {
-    int base_timeout = mgos_sys_config_get_modbus_timeout();
-    int baud = mgos_sys_config_get_modbus_baudrate();
-    
-    // Calculate transmission time for expected bytes
-    // Each byte = 11 bits (start + 8 data + parity + stop)
-    int transmission_time_ms = (expected_bytes * 11 * 1000) / baud;
-    
-    // Add safety margins:
-    // - 2x transmission time for slave processing
-    // - Minimum 500ms for slow slaves
-    // - Maximum base_timeout to respect user config
-    int dynamic_timeout = transmission_time_ms * 2 + 500;
-    
-    return (dynamic_timeout > base_timeout) ? dynamic_timeout : base_timeout;
-}
+static int calculate_frame_gap_ms(void) {
 /*
 Calculate frame gap delay based on baud rate (3.5 character times)
 Modbus RTU requires 3.5 character silence between frames.
@@ -221,26 +209,17 @@ static void update_modbus_read_state(struct mbuf* buffer) {
         case READ_START:
             LOG(LL_VERBOSE_DEBUG, ("SlaveID: %.2x, Function: %.2x - Read modbus response start", s_modbus->slave_id_u8, s_modbus->func_code_u8));
             int count = 0;
-            bool found_sync = false;
-            // More robust sync: look for slave ID followed by valid function code
-            for (int i = 0; i < buffer->len - 1; i++) {
-                if (buffer->buf[i] == s_modbus->slave_id_u8 && 
-                    ((buffer->buf[i+1] & 0x7F) == s_modbus->func_code_u8 || (buffer->buf[i+1] & 0x80))) {
-                    count = i;
-                    found_sync = true;
-                    break;
+            for (int i = 0; i < buffer->len; i++) {
+                if (buffer->buf[i] != s_modbus->slave_id_u8) {
+                    count++;
+                } else {
+                    mbuf_remove(buffer, count);
+                    s_modbus->read_state = RESP_METADATA;
+                    update_modbus_read_state(buffer);
+                    return;
                 }
             }
-            if (found_sync) {
-                mbuf_remove(buffer, count);
-                s_modbus->read_state = RESP_METADATA;
-                update_modbus_read_state(buffer);
-                return;
-            }
-            // If no sync found, keep only last byte (might be start of next frame)
-            if (buffer->len > 1) {
-                mbuf_remove(buffer, buffer->len - 1);
-            }
+            mbuf_remove(buffer, count);
             return;
         case RESP_METADATA:
             // Need at least 3 bytes to determine response length
@@ -259,15 +238,6 @@ static void update_modbus_read_state(struct mbuf* buffer) {
                 s_modbus->resp_status_u8 = RESP_INVALID_FUNCTION;
                 break;
             }
-            
-            // Update timeout based on actual response size for large responses
-            if (s_modbus->resp_bytes_u8 > 50 && req_timer != MGOS_INVALID_TIMER_ID) {
-                mgos_clear_timer(req_timer);
-                int dynamic_timeout = calculate_dynamic_timeout_ms(s_modbus->resp_bytes_u8);
-                req_timer = mgos_set_timer(dynamic_timeout, 0, req_timeout_cb, NULL);
-                LOG(LL_DEBUG, ("Updated timeout to %dms for %d byte response", dynamic_timeout, s_modbus->resp_bytes_u8));
-            }
-            
             s_modbus->read_state = RESP_COMPLETE;
             update_modbus_read_state(buffer);
             return;
@@ -394,11 +364,6 @@ static bool start_transaction() {
 
     if (s_modbus->read_state == DISABLED && s_modbus->transmit_buffer.len > 0) {
         LOG(LL_DEBUG, ("SlaveID: %.2x, Function: %.2x - Modbus Transaction Start", s_modbus->slave_id_u8, s_modbus->func_code_u8));
-        
-        // Setup RX first to avoid missing fast responses
-        mgos_uart_set_rx_enabled(s_modbus->uart_no, true);
-        mgos_uart_set_dispatcher(s_modbus->uart_no, uart_cb, NULL);
-        
         s_modbus->read_state = READ_START;
         mgos_uart_flush(s_modbus->uart_no);
         
@@ -406,7 +371,7 @@ static bool start_transaction() {
         int frame_gap = calculate_frame_gap_ms();
         mgos_msleep(frame_gap);  // 3.5 character delay based on baud rate
         
-        // Start timeout timer JUST before transmission
+        // Start timeout timer
         req_timer = mgos_set_timer(mgos_sys_config_get_modbus_timeout(), 0, req_timeout_cb, NULL);
         if (req_timer == MGOS_INVALID_TIMER_ID) {
             LOG(LL_ERROR, ("Failed to start timeout timer"));
@@ -415,13 +380,11 @@ static bool start_transaction() {
         }
         
         // Transmit the request
-        size_t written = mgos_uart_write(s_modbus->uart_no, s_modbus->transmit_buffer.buf, s_modbus->transmit_buffer.len);
-        if (written != s_modbus->transmit_buffer.len) {
-            LOG(LL_WARN, ("UART write incomplete: %d/%d bytes", written, s_modbus->transmit_buffer.len));
-        }
+        mgos_uart_write(s_modbus->uart_no, s_modbus->transmit_buffer.buf, s_modbus->transmit_buffer.len);
         
-        // Small delay to ensure transmission completes before listening
-        mgos_msleep(1);
+        // Enable RX after transmission
+        mgos_uart_set_rx_enabled(s_modbus->uart_no, true);
+        mgos_uart_set_dispatcher(s_modbus->uart_no, uart_cb, NULL);
         
         return true;
     }
