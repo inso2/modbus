@@ -202,26 +202,42 @@ static void update_modbus_read_state(struct mbuf* buffer) {
         case READ_START:
             LOG(LL_VERBOSE_DEBUG, ("SlaveID: %.2x, Function: %.2x - Read modbus response start", s_modbus->slave_id_u8, s_modbus->func_code_u8));
             int count = 0;
-            for (int i = 0; i < buffer->len; i++) {
-                if (buffer->buf[i] != s_modbus->slave_id_u8) {
-                    count++;
-                } else {
-                    mbuf_remove(buffer, count);
-                    s_modbus->read_state = RESP_METADATA;
-                    update_modbus_read_state(buffer);
-                    return;
+            bool found_sync = false;
+            // More robust sync: look for slave ID followed by valid function code
+            for (int i = 0; i < buffer->len - 1; i++) {
+                if (buffer->buf[i] == s_modbus->slave_id_u8 && 
+                    ((buffer->buf[i+1] & 0x7F) == s_modbus->func_code_u8 || (buffer->buf[i+1] & 0x80))) {
+                    count = i;
+                    found_sync = true;
+                    break;
                 }
             }
-            mbuf_remove(buffer, count);
+            if (found_sync) {
+                mbuf_remove(buffer, count);
+                s_modbus->read_state = RESP_METADATA;
+                update_modbus_read_state(buffer);
+                return;
+            }
+            // If no sync found, keep only last byte (might be start of next frame)
+            if (buffer->len > 1) {
+                mbuf_remove(buffer, buffer->len - 1);
+            }
             return;
         case RESP_METADATA:
-            if (buffer->len < s_modbus->resp_bytes_u8) {
+            // Need at least 3 bytes to determine response length
+            if (buffer->len < 3) {
                 return;
             }
             if (!validate_mb_metadata(buffer)) {
                 LOG(LL_DEBUG, ("SlaveID: %.2x, Function: %.2x - Invalid Response: %.2x, SlaveID: %.2x, Function: %.2x",
                                s_modbus->slave_id_u8, s_modbus->func_code_u8, s_modbus->resp_status_u8,
                                (uint8_t)buffer->buf[0], (uint8_t)buffer->buf[1]));
+                break;
+            }
+            // Only proceed if we calculated a valid response length
+            if (s_modbus->resp_bytes_u8 == 0) {
+                LOG(LL_WARN, ("Cannot determine response length"));
+                s_modbus->resp_status_u8 = RESP_INVALID_FUNCTION;
                 break;
             }
             s_modbus->read_state = RESP_COMPLETE;
@@ -262,8 +278,8 @@ static void uart_cb(int uart_no, void* param) {
     }
 
     mgos_uart_read_mbuf(uart_no, buffer, rx_av);
-    LOG(LL_VERBOSE_DEBUG, ("SlaveID: %.2x, Function: %.2x - uart_cb - Receive Buffer: %d, Read Available: %d",
-                           s_modbus->slave_id_u8, s_modbus->func_code_u8, s_modbus->receive_buffer.len, rx_av));
+    LOG(LL_VERBOSE_DEBUG, ("SlaveID: %.2x, Function: %.2x - uart_cb - Receive Buffer: %d, Read Available: %d, State: %d",
+                           s_modbus->slave_id_u8, s_modbus->func_code_u8, s_modbus->receive_buffer.len, rx_av, s_modbus->read_state));
     update_modbus_read_state(buffer);
 }
 
@@ -272,7 +288,7 @@ static bool init_modbus(uint8_t slave_id, uint8_t func_code, uint8_t total_resp_
         return false;
     s_modbus->cb = cb;
     s_modbus->cb_arg = cb_arg;
-    s_modbus->resp_bytes_u8 = total_resp_bytes;
+    s_modbus->resp_bytes_u8 = total_resp_bytes;  // Will be recalculated in RESP_METADATA
     s_modbus->slave_id_u8 = slave_id;
     s_modbus->func_code_u8 = func_code;
     LOG(LL_DEBUG, ("SlaveID: %.2x, Function: %.2x - Initialize Modbus", s_modbus->slave_id_u8, s_modbus->func_code_u8));
@@ -365,7 +381,7 @@ Read coils from modbus slave, callback function is called when response from mod
 */
 bool mb_read_coils(uint8_t slave_id, uint16_t read_address, uint16_t read_qty, mb_response_callback cb, void* cb_arg) {
     LOG(LL_DEBUG, ("Read Coils, Address: %.2x", read_address));
-    if (!init_modbus(slave_id, FUNC_READ_COILS, 5, cb, cb_arg))
+    if (!init_modbus(slave_id, FUNC_READ_COILS, 0, cb, cb_arg))  // Length calculated dynamically
         return false;
     set_read_address(read_address, read_qty);
 
@@ -379,7 +395,7 @@ Read discrete inputs from modbus slave, callback function is called when respons
 */
 bool mb_read_discrete_inputs(uint8_t slave_id, uint16_t read_address, uint16_t read_qty, mb_response_callback cb, void* cb_arg) {
     LOG(LL_DEBUG, ("Read Discrete Inputs, Address: %.2x", read_address));
-    if (!init_modbus(slave_id, FUNC_READ_DISCRETE_INPUTS, 5, cb, cb_arg))
+    if (!init_modbus(slave_id, FUNC_READ_DISCRETE_INPUTS, 0, cb, cb_arg))  // Length calculated dynamically
         return false;
     set_read_address(read_address, read_qty);
 
@@ -393,7 +409,7 @@ Read holding registers from modbus slave, callback function is called when respo
 */
 bool mb_read_holding_registers(uint8_t slave_id, uint16_t read_address, uint16_t read_qty, mb_response_callback cb, void* cb_arg) {
     LOG(LL_DEBUG, ("Read Holding Registers, Address: %.2x", read_address));
-    if (!init_modbus(slave_id, FUNC_READ_HOLDING_REGISTERS, 5, cb, cb_arg))
+    if (!init_modbus(slave_id, FUNC_READ_HOLDING_REGISTERS, 0, cb, cb_arg))  // Length calculated dynamically
         return false;
     set_read_address(read_address, read_qty);
 
@@ -407,7 +423,7 @@ Read input registers from modbus slave, callback function is called when respons
 */
 bool mb_read_input_registers(uint8_t slave_id, uint16_t read_address, uint16_t read_qty, mb_response_callback cb, void* cb_arg) {
     LOG(LL_DEBUG, ("Read Input Registers, Address: %.2x", read_address));
-    if (!init_modbus(slave_id, FUNC_READ_INPUT_REGISTERS, 5, cb, cb_arg))
+    if (!init_modbus(slave_id, FUNC_READ_INPUT_REGISTERS, 0, cb, cb_arg))  // Length calculated dynamically
         return false;
     set_read_address(read_address, read_qty);
 
