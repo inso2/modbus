@@ -101,6 +101,21 @@ static uint8_t verify_crc16(struct mbuf value) {
 }
 
 /*
+Calculate frame gap delay based on baud rate (3.5 character times)
+Modbus RTU requires 3.5 character silence between frames.
+Each character = 1 start + 8 data + 1 parity + 1 stop = 11 bits
+At baud rates >= 19200, use fixed 1.75ms minimum
+*/
+static int calculate_frame_gap_ms(void) {
+    int baud = mgos_sys_config_get_modbus_baudrate();
+    if (baud >= 19200) {
+        return 2;  // Fixed 1.75ms minimum, rounded up to 2ms
+    }
+    // 3.5 characters * 11 bits/char * 1000ms/s / baud_rate
+    return (int)((3.5 * 11 * 1000) / baud) + 1;  // +1ms for safety margin
+}
+
+/*
 Callback function that is called when a set timeout period expires before receiving a response.
 */
 static void req_timeout_cb(void* arg) {
@@ -334,7 +349,8 @@ static bool start_transaction() {
         LOG(LL_DEBUG, ("SlaveID: %.2x, Function: %.2x - Modbus Transaction Start", s_modbus->slave_id_u8, s_modbus->func_code_u8));
         s_modbus->read_state = READ_START;
         mgos_uart_flush(s_modbus->uart_no);
-        mgos_msleep(30);  //TODO delay for 3.5 Characters length according to baud rate
+        int frame_gap = calculate_frame_gap_ms();
+        mgos_msleep(frame_gap);  // 3.5 character delay based on baud rate
         req_timer = mgos_set_timer(mgos_sys_config_get_modbus_timeout(), 0, req_timeout_cb, NULL);
         mgos_uart_write(s_modbus->uart_no, s_modbus->transmit_buffer.buf, s_modbus->transmit_buffer.len);
         mgos_uart_set_rx_enabled(s_modbus->uart_no, true);
